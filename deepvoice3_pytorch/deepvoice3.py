@@ -3,7 +3,6 @@
 import torch
 from torch import nn
 from torch.nn import functional as F
-from torch.autograd import Variable
 import math
 import numpy as np
 
@@ -72,7 +71,7 @@ class Encoder(nn.Module):
         assert self.n_speakers == 1 or speaker_embed is not None
 
         # embed text_sequences
-        x = self.embed_tokens(text_sequences)
+        x = self.embed_tokens(text_sequences.long())
         x = F.dropout(x, p=self.dropout, training=self.training)
 
         # expand speaker embedding for all time steps
@@ -207,9 +206,9 @@ class Decoder(nn.Module):
 
         # Position encodings for query (decoder states) and keys (encoder states)
         self.embed_query_positions = SinusoidalEncoding(
-            max_positions, convolutions[0][0], padding_idx)
+            max_positions, convolutions[0][0])
         self.embed_keys_positions = SinusoidalEncoding(
-            max_positions, embed_dim, padding_idx)
+            max_positions, embed_dim)
         # Used for compute multiplier for positional encodings
         if n_speakers > 1:
             self.speaker_proj1 = Linear(speaker_embed_dim, 1, dropout=dropout)
@@ -306,13 +305,13 @@ class Decoder(nn.Module):
             w = self.key_position_rate
             # TODO: may be useful to have projection per attention layer
             if self.speaker_proj1 is not None:
-                w = w * F.sigmoid(self.speaker_proj1(speaker_embed)).view(-1)
+                w = w * torch.sigmoid(self.speaker_proj1(speaker_embed)).view(-1)
             text_pos_embed = self.embed_keys_positions(text_positions, w)
             keys = keys + text_pos_embed
         if frame_positions is not None:
             w = self.query_position_rate
             if self.speaker_proj2 is not None:
-                w = w * F.sigmoid(self.speaker_proj2(speaker_embed)).view(-1)
+                w = w * torch.sigmoid(self.speaker_proj2(speaker_embed)).view(-1)
             frame_pos_embed = self.embed_query_positions(frame_positions, w)
 
         # transpose only once to speed up attention layers
@@ -358,10 +357,10 @@ class Decoder(nn.Module):
         x = x.transpose(1, 2)
 
         # project to mel-spectorgram
-        outputs = F.sigmoid(x)
+        outputs = torch.sigmoid(x)
 
         # Done flag
-        done = F.sigmoid(self.fc(x))
+        done = torch.sigmoid(self.fc(x))
 
         return outputs, torch.stack(alignments), done, decoder_states
 
@@ -374,7 +373,7 @@ class Decoder(nn.Module):
         w = self.key_position_rate
         # TODO: may be useful to have projection per attention layer
         if self.speaker_proj1 is not None:
-            w = w * F.sigmoid(self.speaker_proj1(speaker_embed)).view(-1)
+            w = w * torch.sigmoid(self.speaker_proj1(speaker_embed)).view(-1)
         text_pos_embed = self.embed_keys_positions(text_positions, w)
         keys = keys + text_pos_embed
 
@@ -393,15 +392,14 @@ class Decoder(nn.Module):
         num_attention_layers = sum([layer is not None for layer in self.attention])
         t = 0
         if initial_input is None:
-            initial_input = Variable(
-                keys.data.new(B, 1, self.in_dim * self.r).zero_())
+            initial_input = keys.data.new(B, 1, self.in_dim * self.r).zero_()
         current_input = initial_input
         while True:
             # frame pos start with 1.
-            frame_pos = Variable(keys.data.new(B, 1).fill_(t + 1)).long()
+            frame_pos = keys.data.new(B, 1).fill_(t + 1).long()
             w = self.query_position_rate
             if self.speaker_proj2 is not None:
-                w = w * F.sigmoid(self.speaker_proj2(speaker_embed)).view(-1)
+                w = w * torch.sigmoid(self.speaker_proj2(speaker_embed)).view(-1)
             frame_pos_embed = self.embed_query_positions(frame_pos, w)
 
             if test_inputs is not None:
@@ -459,8 +457,8 @@ class Decoder(nn.Module):
             ave_alignment = ave_alignment.div_(num_attention_layers)
 
             # Ooutput & done flag predictions
-            output = F.sigmoid(x)
-            done = F.sigmoid(self.fc(x))
+            output = torch.sigmoid(x)
+            done = torch.sigmoid(self.fc(x))
 
             decoder_states += [decoder_state]
             outputs += [output]
@@ -487,8 +485,17 @@ class Decoder(nn.Module):
         return outputs, alignments, dones, decoder_states
 
     def start_fresh_sequence(self):
-        for conv in self.convolutions:
-            conv.clear_buffer()
+        _clear_modules(self.preattention)
+        _clear_modules(self.convolutions)
+        self.last_conv.clear_buffer()
+
+
+def _clear_modules(modules):
+    for m in modules:
+        try:
+            m.clear_buffer()
+        except AttributeError as e:
+            pass
 
 
 class Converter(nn.Module):
@@ -594,4 +601,4 @@ class Converter(nn.Module):
         # Back to B x T x C
         x = x.transpose(1, 2)
 
-        return F.sigmoid(x)
+        return torch.sigmoid(x)

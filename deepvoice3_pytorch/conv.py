@@ -1,14 +1,11 @@
 # coding: utf-8
 import torch
 from torch import nn
-from torch.autograd import Variable
 from torch.nn import functional as F
 
 
 class Conv1d(nn.Conv1d):
     """Extended nn.Conv1d for incremental dilated convolutions
-
-    currently limited for odd number kernel sizes
     """
 
     def __init__(self, *args, **kwargs):
@@ -33,7 +30,6 @@ class Conv1d(nn.Conv1d):
 
         bsz = input.size(0)  # input: bsz x len x dim
         if kw > 1:
-            assert kw % 2 == 1
             input = input.data
             if self.input_buffer is None:
                 self.input_buffer = input.new(bsz, kw + (kw - 1) * (dilation - 1), input.size(2))
@@ -43,7 +39,7 @@ class Conv1d(nn.Conv1d):
                 self.input_buffer[:, :-1, :] = self.input_buffer[:, 1:, :].clone()
             # append next input
             self.input_buffer[:, -1, :] = input[:, -1, :]
-            input = torch.autograd.Variable(self.input_buffer, volatile=True)
+            input = self.input_buffer
             if dilation > 1:
                 input = input[:, 0::dilation, :].contiguous()
         output = F.linear(input.view(bsz, -1), weight, self.bias)

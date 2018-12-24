@@ -3,6 +3,8 @@ from functools import partial
 import numpy as np
 import os
 import audio
+import re
+
 from hparams import hparams
 
 
@@ -21,23 +23,33 @@ def build_from_path(in_dir, out_dir, num_workers=1, tqdm=lambda x: x):
 
     # We use ProcessPoolExecutor to parallize across processes. This is just an optimization and you
     # can omit it and just call _process_utterance on each input if you want.
+
+    # You will need to modify and format NIKL transcrption file will UTF-8 format
+    # please check https://github.com/homink/deepspeech.pytorch.ko/blob/master/data/local/clean_corpus.sh
+
     executor = ProcessPoolExecutor(max_workers=num_workers)
     futures = []
+
+    spk_id = {}
+    with open(in_dir + '/speaker.mid', encoding='utf-8') as f:
+        for i, line in enumerate(f):
+            spk_id[line.rstrip()] = i
+
     index = 1
-    with open(os.path.join(in_dir, 'metadata.csv'), encoding='utf-8') as f:
+    with open(in_dir + '/metadata.txt', encoding='utf-8') as f:
         for line in f:
             parts = line.strip().split('|')
-            wav_path = os.path.join(in_dir, 'wavs', '%s.wav' % parts[0])
-            text = parts[2]
-            if len(text) < hparams.min_text:
-                continue
+            wav_path = parts[0]
+            text = parts[1]
+            uid = re.search(r'([a-z][a-z][0-9][0-9]_t)', wav_path)
+            uid = uid.group(1).replace('_t', '')
             futures.append(executor.submit(
-                partial(_process_utterance, out_dir, index, wav_path, text)))
+                partial(_process_utterance, out_dir, index + 1, spk_id[uid], wav_path, text)))
             index += 1
     return [future.result() for future in tqdm(futures)]
 
 
-def _process_utterance(out_dir, index, wav_path, text):
+def _process_utterance(out_dir, index, speaker_id, wav_path, text):
     '''Preprocesses a single utterance audio/text pair.
 
     This writes the mel and linear scale spectrograms to disk and returns a tuple to write
@@ -67,10 +79,10 @@ def _process_utterance(out_dir, index, wav_path, text):
     mel_spectrogram = audio.melspectrogram(wav).astype(np.float32)
 
     # Write the spectrograms to disk:
-    spectrogram_filename = 'ljspeech-spec-%05d.npy' % index
-    mel_filename = 'ljspeech-mel-%05d.npy' % index
+    spectrogram_filename = 'nikl-multi-spec-%05d.npy' % index
+    mel_filename = 'nikl-multi-mel-%05d.npy' % index
     np.save(os.path.join(out_dir, spectrogram_filename), spectrogram.T, allow_pickle=False)
     np.save(os.path.join(out_dir, mel_filename), mel_spectrogram.T, allow_pickle=False)
 
     # Return a tuple describing this training example:
-    return (spectrogram_filename, mel_filename, n_frames, text)
+    return (spectrogram_filename, mel_filename, n_frames, text, speaker_id)

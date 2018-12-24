@@ -3,6 +3,8 @@ from functools import partial
 import numpy as np
 import os
 import audio
+import re
+
 from hparams import hparams
 
 
@@ -21,18 +23,25 @@ def build_from_path(in_dir, out_dir, num_workers=1, tqdm=lambda x: x):
 
     # We use ProcessPoolExecutor to parallize across processes. This is just an optimization and you
     # can omit it and just call _process_utterance on each input if you want.
+
+    # You will need to modify and format NIKL transcrption file will UTF-8 format
+    # please check https://github.com/homink/deepspeech.pytorch.ko/blob/master/data/local/clean_corpus.sh
+
     executor = ProcessPoolExecutor(max_workers=num_workers)
     futures = []
+
+    with open(in_dir + '/speaker.sid', encoding='utf-8') as f:
+        spk_id = f.readline().rstrip()
+
     index = 1
-    with open(os.path.join(in_dir, 'metadata.csv'), encoding='utf-8') as f:
+    with open(in_dir + '/metadata.txt', encoding='utf-8') as f:
         for line in f:
-            parts = line.strip().split('|')
-            wav_path = os.path.join(in_dir, 'wavs', '%s.wav' % parts[0])
-            text = parts[2]
-            if len(text) < hparams.min_text:
-                continue
-            futures.append(executor.submit(
-                partial(_process_utterance, out_dir, index, wav_path, text)))
+            if spk_id in line:
+                parts = line.strip().split('|')
+                wav_path = parts[0]
+                text = parts[1]
+                futures.append(executor.submit(
+                    partial(_process_utterance, out_dir, index + 1, wav_path, text)))
             index += 1
     return [future.result() for future in tqdm(futures)]
 
@@ -67,8 +76,8 @@ def _process_utterance(out_dir, index, wav_path, text):
     mel_spectrogram = audio.melspectrogram(wav).astype(np.float32)
 
     # Write the spectrograms to disk:
-    spectrogram_filename = 'ljspeech-spec-%05d.npy' % index
-    mel_filename = 'ljspeech-mel-%05d.npy' % index
+    spectrogram_filename = 'nikl-single-spec-%05d.npy' % index
+    mel_filename = 'nikl-single-mel-%05d.npy' % index
     np.save(os.path.join(out_dir, spectrogram_filename), spectrogram.T, allow_pickle=False)
     np.save(os.path.join(out_dir, mel_filename), mel_spectrogram.T, allow_pickle=False)
 

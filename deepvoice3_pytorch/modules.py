@@ -32,38 +32,34 @@ def sinusoidal_encode(x, w):
 
 
 class SinusoidalEncoding(nn.Embedding):
-    def __init__(self, num_embeddings, embedding_dim, padding_idx=0,
+
+    def __init__(self, num_embeddings, embedding_dim,
                  *args, **kwargs):
         super(SinusoidalEncoding, self).__init__(num_embeddings, embedding_dim,
-                                                 padding_idx, *args, **kwargs)
+                                                 padding_idx=0,
+                                                 *args, **kwargs)
         self.weight.data = position_encoding_init(num_embeddings, embedding_dim,
                                                   position_rate=1.0,
                                                   sinusoidal=False)
 
     def forward(self, x, w=1.0):
         isscaler = np.isscalar(w)
-        padding_idx = self.padding_idx
-        if padding_idx is None:
-            padding_idx = -1
+        assert self.padding_idx is not None
 
         if isscaler or w.size(0) == 1:
             weight = sinusoidal_encode(self.weight, w)
-            return self._backend.Embedding.apply(
-                x, weight,
-                padding_idx, self.max_norm, self.norm_type,
-                self.scale_grad_by_freq, self.sparse
-            )
+            return F.embedding(
+                x, weight, self.padding_idx, self.max_norm,
+                self.norm_type, self.scale_grad_by_freq, self.sparse)
         else:
             # TODO: cannot simply apply for batch
             # better to implement efficient function
             pe = []
             for batch_idx, we in enumerate(w):
                 weight = sinusoidal_encode(self.weight, we)
-                pe.append(self._backend.Embedding.apply(
-                    x[batch_idx], weight,
-                    padding_idx, self.max_norm, self.norm_type,
-                    self.scale_grad_by_freq, self.sparse
-                ))
+                pe.append(F.embedding(
+                    x[batch_idx], weight, self.padding_idx, self.max_norm,
+                    self.norm_type, self.scale_grad_by_freq, self.sparse))
             pe = torch.stack(pe)
             return pe
 
@@ -164,7 +160,7 @@ class Conv1dGLU(nn.Module):
             # Since conv layer assumes BCT, we need to transpose
             softsign = softsign if is_incremental else softsign.transpose(1, 2)
             a = a + softsign
-        x = a * F.sigmoid(b)
+        x = a * torch.sigmoid(b)
         return (x + residual) * math.sqrt(0.5) if self.residual else x
 
     def clear_buffer(self):
@@ -226,7 +222,7 @@ class HighwayConv1d(nn.Module):
             return (x + residual) * math.sqrt(0.5)
         else:
             a, b = x.split(x.size(splitdim) // 2, dim=splitdim)
-            T = F.sigmoid(b)
+            T = torch.sigmoid(b)
             return (T * a + (1 - T) * residual)
 
     def clear_buffer(self):

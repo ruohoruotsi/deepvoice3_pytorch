@@ -3,7 +3,6 @@
 import torch
 from torch import nn
 from torch.nn import functional as F
-from torch.autograd import Variable
 import math
 import numpy as np
 
@@ -238,10 +237,10 @@ class Decoder(nn.Module):
         x = x.transpose(1, 2)
 
         # Mel
-        outputs = F.sigmoid(x)
+        outputs = torch.sigmoid(x)
 
         # Done prediction
-        done = F.sigmoid(self.fc(x))
+        done = torch.sigmoid(self.fc(x))
 
         # Adding extra dim for convenient
         alignments = alignments.unsqueeze(0)
@@ -270,12 +269,11 @@ class Decoder(nn.Module):
 
         t = 0
         if initial_input is None:
-            initial_input = Variable(
-                keys.data.new(B, 1, self.in_dim * self.r).zero_())
+            initial_input = keys.data.new(B, 1, self.in_dim * self.r).zero_()
         current_input = initial_input
         while True:
             # frame pos start with 1.
-            frame_pos = Variable(keys.data.new(B, 1).fill_(t + 1)).long()
+            frame_pos = keys.data.new(B, 1).fill_(t + 1).long()
             frame_pos_embed = self.embed_query_positions(frame_pos)
 
             if test_inputs is not None:
@@ -312,8 +310,8 @@ class Decoder(nn.Module):
             x = self.last_conv.incremental_forward(x)
 
             # Ooutput & done flag predictions
-            output = F.sigmoid(x)
-            done = F.sigmoid(self.fc(x))
+            output = torch.sigmoid(x)
+            done = torch.sigmoid(self.fc(x))
 
             decoder_states += [decoder_state]
             outputs += [output]
@@ -342,6 +340,7 @@ class Decoder(nn.Module):
     def start_fresh_sequence(self):
         _clear_modules(self.audio_encoder_modules)
         _clear_modules(self.audio_decoder_modules)
+        self.last_conv.clear_buffer()
 
 
 def _clear_modules(modules):
