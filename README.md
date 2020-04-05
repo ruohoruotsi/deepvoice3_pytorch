@@ -14,6 +14,10 @@ PyTorch implementation of convolutional networks-based text-to-speech synthesis 
 
 Audio samples are available at https://r9y9.github.io/deepvoice3_pytorch/.
 
+## Folks
+
+- https://github.com/hash2430/dv3_world: DeepVoice3 with WORLD vocoder support. [#166](https://github.com/r9y9/deepvoice3_pytorch/issues/166)
+
 ## Online TTS demo
 
 Notebooks supposed to be executed on https://colab.research.google.com are available:
@@ -80,9 +84,9 @@ python synthesis.py --preset=20180505_deepvoice3_ljspeech.json \
 
 ## Requirements
 
-- Python 3
+- Python >= 3.5
 - CUDA >= 8.0
-- PyTorch >= v0.4.0
+- PyTorch >= v1.0.0
 - [nnmnkwii](https://github.com/r9y9/nnmnkwii) >= v0.0.11
 - [MeCab](http://taku910.github.io/mecab/) (Japanese only)
 

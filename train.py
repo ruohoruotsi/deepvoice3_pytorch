@@ -55,8 +55,6 @@ from matplotlib import cm
 from warnings import warn
 from hparams import hparams, hparams_debug_string
 
-fs = hparams.sample_rate
-
 global_step = 0
 global_epoch = 0
 use_cuda = torch.cuda.is_available()
@@ -342,8 +340,10 @@ def collate_fn(batch):
     s, e = 1, max_decoder_target_len + 1
     # if b_pad > 0:
     #    s, e = s - 1, e - 1
+    # NOTE: needs clone to supress RuntimeError in dataloarder...
+    # ref: https://github.com/pytorch/pytorch/issues/10756
     frame_positions = torch.arange(s, e).long().unsqueeze(0).expand(
-        len(batch), max_decoder_target_len)
+        len(batch), max_decoder_target_len).clone()
 
     # done flags
     done = np.array([_pad(np.zeros(len(x[1]) // r // downsample_step - 1),
@@ -411,11 +411,17 @@ def eval_model(global_step, writer, device, model, checkpoint_dir, ismultispeake
                 global_step, idx, speaker_str))
             save_alignment(path, alignment)
             tag = "eval_averaged_alignment_{}_{}".format(idx, speaker_str)
-            writer.add_image(tag, np.uint8(cm.viridis(np.flip(alignment, 1).T) * 255), global_step)
+            try:
+                writer.add_image(tag, np.uint8(cm.viridis(np.flip(alignment, 1).T) * 255), global_step)
+            except Exception as e:
+                warn(str(e))
 
             # Mel
-            writer.add_image("(Eval) Predicted mel spectrogram text{}_{}".format(idx, speaker_str),
-                             prepare_spec_image(mel), global_step)
+            try:
+                writer.add_image("(Eval) Predicted mel spectrogram text{}_{}".format(idx, speaker_str),
+                                 prepare_spec_image(mel), global_step)
+            except Exception as e:
+                warn(str(e))
 
             # Audio
             path = join(eval_output_dir, "step{:09d}_text{}_{}_predicted.wav".format(
@@ -424,7 +430,7 @@ def eval_model(global_step, writer, device, model, checkpoint_dir, ismultispeake
 
             try:
                 writer.add_audio("(Eval) Predicted audio signal {}_{}".format(idx, speaker_str),
-                                 signal, global_step, sample_rate=fs)
+                                 signal, global_step, sample_rate=hparams.sample_rate)
             except Exception as e:
                 warn(str(e))
                 pass
@@ -444,36 +450,54 @@ def save_states(global_step, writer, mel_outputs, linear_outputs, attn, mel, y,
         for i, alignment in enumerate(attn):
             alignment = alignment[idx].cpu().data.numpy()
             tag = "alignment_layer{}".format(i + 1)
-            writer.add_image(tag, np.uint8(cm.viridis(np.flip(alignment, 1).T) * 255), global_step)
-
-            # save files as well for now
-            alignment_dir = join(checkpoint_dir, "alignment_layer{}".format(i + 1))
-            os.makedirs(alignment_dir, exist_ok=True)
-            path = join(alignment_dir, "step{:09d}_layer_{}_alignment.png".format(
-                global_step, i + 1))
-            save_alignment(path, alignment)
+            try:
+                writer.add_image(tag, np.uint8(cm.viridis(
+                    np.flip(alignment, 1).T) * 255), global_step)
+                # save files as well for now
+                alignment_dir = join(
+                    checkpoint_dir, "alignment_layer{}".format(i + 1))
+                os.makedirs(alignment_dir, exist_ok=True)
+                path = join(alignment_dir, "step{:09d}_layer_{}_alignment.png".format(
+                    global_step, i + 1))
+                save_alignment(path, alignment)
+            except Exception as e:
+                warn(str(e))
 
         # Save averaged alignment
         alignment_dir = join(checkpoint_dir, "alignment_ave")
         os.makedirs(alignment_dir, exist_ok=True)
-        path = join(alignment_dir, "step{:09d}_alignment.png".format(global_step))
+        path = join(alignment_dir, "step{:09d}_layer_alignment.png".format(global_step))
         alignment = attn.mean(0)[idx].cpu().data.numpy()
         save_alignment(path, alignment)
-
         tag = "averaged_alignment"
-        writer.add_image(tag, np.uint8(cm.viridis(np.flip(alignment, 1).T) * 255), global_step)
+
+        try:
+            writer.add_image(tag, np.uint8(cm.viridis(
+                np.flip(alignment, 1).T) * 255), global_step)
+        except Exception as e:
+            warn(str(e))
 
     # Predicted mel spectrogram
     if mel_outputs is not None:
         mel_output = mel_outputs[idx].cpu().data.numpy()
         mel_output = prepare_spec_image(audio._denormalize(mel_output))
-        writer.add_image("Predicted mel spectrogram", mel_output, global_step)
+        try:
+            writer.add_image("Predicted mel spectrogram",
+                             mel_output, global_step)
+        except Exception as e:
+            warn(str(e))
+            pass
 
     # Predicted spectrogram
     if linear_outputs is not None:
         linear_output = linear_outputs[idx].cpu().data.numpy()
         spectrogram = prepare_spec_image(audio._denormalize(linear_output))
-        writer.add_image("Predicted linear spectrogram", spectrogram, global_step)
+        try:
+            writer.add_image("Predicted linear spectrogram",
+                             spectrogram, global_step)
+        except Exception as e:
+            warn(str(e))
+            pass
 
         # Predicted audio signal
         signal = audio.inv_spectrogram(linear_output.T)
@@ -481,7 +505,8 @@ def save_states(global_step, writer, mel_outputs, linear_outputs, attn, mel, y,
         path = join(checkpoint_dir, "step{:09d}_predicted.wav".format(
             global_step))
         try:
-            writer.add_audio("Predicted audio signal", signal, global_step, sample_rate=fs)
+            writer.add_audio("Predicted audio signal", signal,
+                             global_step, sample_rate=hparams.sample_rate)
         except Exception as e:
             warn(str(e))
             pass
@@ -491,13 +516,22 @@ def save_states(global_step, writer, mel_outputs, linear_outputs, attn, mel, y,
     if mel_outputs is not None:
         mel_output = mel[idx].cpu().data.numpy()
         mel_output = prepare_spec_image(audio._denormalize(mel_output))
-        writer.add_image("Target mel spectrogram", mel_output, global_step)
+        try:
+            writer.add_image("Target mel spectrogram", mel_output, global_step)
+        except Exception as e:
+            warn(str(e))
+            pass
 
     # Target spectrogram
     if linear_outputs is not None:
         linear_output = y[idx].cpu().data.numpy()
         spectrogram = prepare_spec_image(audio._denormalize(linear_output))
-        writer.add_image("Target linear spectrogram", spectrogram, global_step)
+        try:
+            writer.add_image("Target linear spectrogram",
+                             spectrogram, global_step)
+        except Exception as e:
+            warn(str(e))
+            pass
 
 
 def logit(x, eps=1e-8):
@@ -681,7 +715,7 @@ Please set a larger value for ``max_position`` in hyper parameters.""".format(
 
             # linear:
             if train_postnet:
-                n_priority_freq = int(hparams.priority_freq / (fs * 0.5) * linear_dim)
+                n_priority_freq = int(hparams.priority_freq / (hparams.sample_rate * 0.5) * linear_dim)
                 linear_l1_loss, linear_binary_div = spec_loss(
                     linear_outputs[:, :-r, :], y[:, r:, :], target_mask,
                     priority_bin=n_priority_freq,
@@ -714,7 +748,8 @@ Please set a larger value for ``max_position`` in hyper parameters.""".format(
                     train_seq2seq, train_postnet)
 
             if global_step > 0 and global_step % hparams.eval_interval == 0:
-                eval_model(global_step, writer, device, model, checkpoint_dir, ismultispeaker)
+                eval_model(global_step, writer, device, model,
+                           checkpoint_dir, ismultispeaker)
 
             # Update
             loss.backward()
@@ -733,8 +768,7 @@ Please set a larger value for ``max_position`` in hyper parameters.""".format(
             if train_postnet:
                 writer.add_scalar("linear_loss", float(linear_loss.item()), global_step)
                 writer.add_scalar("linear_l1_loss", float(linear_l1_loss.item()), global_step)
-                writer.add_scalar("linear_binary_div_loss", float(
-                    linear_binary_div.item()), global_step)
+                writer.add_scalar("linear_binary_div_loss", float(linear_binary_div.item()), global_step)
             if train_seq2seq and hparams.use_guided_attention:
                 writer.add_scalar("attn_loss", float(attn_loss.item()), global_step)
             if clip_thresh > 0:
@@ -931,7 +965,7 @@ if __name__ == "__main__":
     data_loader = data_utils.DataLoader(
         dataset, batch_size=hparams.batch_size,
         num_workers=hparams.num_workers, sampler=sampler,
-        collate_fn=collate_fn, pin_memory=hparams.pin_memory)
+        collate_fn=collate_fn, pin_memory=hparams.pin_memory, drop_last=True)
 
     device = torch.device("cuda" if use_cuda else "cpu")
 
@@ -965,12 +999,11 @@ if __name__ == "__main__":
     # Setup summary writer for tensorboard
     if log_event_path is None:
         if platform.system() == "Windows":
-            log_event_path = "log/run-test" + \
-                str(datetime.now()).replace(" ", "_").replace(":", "_")
+            log_event_path = "log/run-test" + str(datetime.now()).replace(" ", "_").replace(":", "_")
         else:
             log_event_path = "log/run-test" + str(datetime.now()).replace(" ", "_")
-    print("Los event path: {}".format(log_event_path))
-    writer = SummaryWriter(log_dir=log_event_path)
+    print("Log event path: {}".format(log_event_path))
+    writer = SummaryWriter(log_event_path)
 
     # Train!
     try:
